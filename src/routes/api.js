@@ -1,10 +1,55 @@
 const express = require('express');
 const router = express.Router();
 const UserData = require('../models/UserData');
-const { validateWalletAddress, validateUserData } = require('../middleware/validation');
+const authenticate = require('../middleware/auth');
+const { generateToken } = require('../utils/jwt');
+const {
+  validateWalletAddress,
+  validateUserData,
+  validateLogin,
+  validatePlayerName,
+  validateStatsFilter,
+} = require('../middleware/validation');
 const logger = require('../utils/logger');
 
-// GET /api/user - Get or create user data
+// ==================== PUBLIC ENDPOINTS ====================
+
+// POST /api/auth/login - Login and get JWT token
+router.post('/auth/login', validateLogin, async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body;
+    const normalizedAddress = walletAddress.toLowerCase();
+
+    // Find or create user
+    let userData = await UserData.findOne({ walletAddress: normalizedAddress });
+
+    if (!userData) {
+      // Create new user if doesn't exist
+      userData = new UserData({ walletAddress: normalizedAddress });
+      await userData.save();
+      logger.info(`New user created during login: ${normalizedAddress}`);
+    }
+
+    // Generate JWT token
+    const token = generateToken(normalizedAddress, userData._id);
+
+    logger.info(`User logged in: ${normalizedAddress}`);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        token,
+        walletAddress: normalizedAddress,
+        expiresIn: process.env.JWT_EXPIRES_IN || '30d',
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/user - Get or create user data (kept for backward compatibility)
 router.get('/user', validateWalletAddress, async (req, res, next) => {
   try {
     const { walletAddress } = req.query;
@@ -12,7 +57,6 @@ router.get('/user', validateWalletAddress, async (req, res, next) => {
 
     let userData = await UserData.findOne({ walletAddress: normalizedAddress });
 
-    // Create new user if doesn't exist
     if (!userData) {
       userData = new UserData({ walletAddress: normalizedAddress });
       await userData.save();
@@ -28,13 +72,12 @@ router.get('/user', validateWalletAddress, async (req, res, next) => {
   }
 });
 
-// POST /api/user - Save user data
+// POST /api/user - Save user data (kept for backward compatibility)
 router.post('/user', validateWalletAddress, validateUserData, async (req, res, next) => {
   try {
     const { walletAddress, ...userData } = req.body;
     const normalizedAddress = walletAddress.toLowerCase();
 
-    // Find and update, or create new
     const updatedUser = await UserData.findOneAndUpdate(
       { walletAddress: normalizedAddress },
       {
@@ -84,6 +127,106 @@ router.get('/leaderboard', async (req, res, next) => {
       data: formattedLeaderboard,
       count: formattedLeaderboard.length,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ==================== PROTECTED ENDPOINTS (Require JWT) ====================
+
+// GET /api/player/data - Get player data
+router.get('/player/data', authenticate, async (req, res, next) => {
+  try {
+    const userData = await UserData.findOne({ 
+      walletAddress: req.walletAddress 
+    }).select('playerData');
+
+    if (!userData) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: userData.playerData,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/player/name - Update player name (playerNames0)
+router.post('/player/name', authenticate, validatePlayerName, async (req, res, next) => {
+  try {
+    const { playerNames0 } = req.body;
+
+    const updatedUser = await UserData.findOneAndUpdate(
+      { walletAddress: req.walletAddress },
+      {
+        $set: {
+          'playerData.playerNames0': playerNames0,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    logger.info(`Player name updated for ${req.walletAddress}: ${playerNames0}`);
+
+    res.json({
+      success: true,
+      message: 'Player name updated successfully',
+      data: {
+        playerNames0: updatedUser.playerData.playerNames0,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/player/stats - Get user stats with optional filter
+router.get('/player/stats', authenticate, validateStatsFilter, async (req, res, next) => {
+  try {
+    const { statType } = req.query;
+
+    const userData = await UserData.findOne({ 
+      walletAddress: req.walletAddress 
+    }).select('stats');
+
+    if (!userData) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    // If specific stat type requested, return only that stat
+    if (statType) {
+      res.json({
+        success: true,
+        data: {
+          [statType]: userData.stats[statType],
+        },
+      });
+    } else {
+      // Return all stats
+      res.json({
+        success: true,
+        data: userData.stats,
+      });
+    }
   } catch (error) {
     next(error);
   }

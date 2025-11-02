@@ -58,6 +58,38 @@ const userDataSchema = Joi.object({
   }),
 });
 
+// Login validation
+const loginSchema = Joi.object({
+  walletAddress: walletAddressSchema,
+});
+
+// Player name validation
+const playerNameSchema = Joi.object({
+  playerNames0: Joi.string().min(1).max(50).required().messages({
+    'string.empty': 'Player name cannot be empty',
+    'string.max': 'Player name cannot exceed 50 characters',
+    'any.required': 'Player name is required',
+  }),
+});
+
+// Stats filter validation
+const statsFilterSchema = Joi.object({
+  statType: Joi.string()
+    .valid(
+      'totalTimePlayed',
+      'totalGamesPlayedVsCPU',
+      'totalGamesWonVsCPU',
+      'totalGamesPlayedVsHuman',
+      'totalGamesWonVsHuman',
+      'totalBallsPocketed',
+      'ttBestScore',
+      'matrixBestScore'
+    )
+    .messages({
+      'any.only': 'Invalid stat type. Must be one of: totalTimePlayed, totalGamesPlayedVsCPU, totalGamesWonVsCPU, totalGamesPlayedVsHuman, totalGamesWonVsHuman, totalBallsPocketed, ttBestScore, matrixBestScore',
+    }),
+});
+
 const validateWalletAddress = (req, res, next) => {
   const { error } = walletAddressSchema.validate(req.query.walletAddress || req.body.walletAddress);
   
@@ -87,7 +119,49 @@ const validateUserData = (req, res, next) => {
   next();
 };
 
+const validateLogin = (req, res, next) => {
+  const { error } = loginSchema.validate(req.body);
+  
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: error.details[0].message,
+    });
+  }
+  
+  next();
+};
+
+const validatePlayerName = (req, res, next) => {
+  const { error } = playerNameSchema.validate(req.body);
+  
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: error.details[0].message,
+    });
+  }
+  
+  next();
+};
+
+const validateStatsFilter = (req, res, next) => {
+  const { error } = statsFilterSchema.validate(req.query);
+  
+  if (error) {
+    return res.status(400).json({
+      success: false,
+      error: error.details[0].message,
+    });
+  }
+  
+  next();
+};
+
 module.exports = {
   validateWalletAddress,
   validateUserData,
+  validateLogin,
+  validatePlayerName,
+  validateStatsFilter,
 };
